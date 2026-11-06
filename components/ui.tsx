@@ -129,11 +129,13 @@ export function Modal({
 export function AuthModal({
   onClose,
   onSuccess,
+  initialMode = 'register',
 }: {
   onClose: () => void;
   onSuccess: (u: User) => void;
+  initialMode?: 'register' | 'login';
 }) {
-  const [register, setRegister] = useState(true),
+  const [register, setRegister] = useState(initialMode === 'register'),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (

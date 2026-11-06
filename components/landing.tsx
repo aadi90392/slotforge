@@ -18,6 +18,8 @@ import { Brand, Orb, ArrowButton, AuthModal } from "./ui";
 export default function Landing() {
   const [auth, setAuth] = useState(false),
     [menu, setMenu] = useState(false);
+  const [authMode,setAuthMode]=useState<'register'|'login'>('register');
+  function openSignup(){setAuthMode('register');setAuth(true);}
   return (
     <>
       <header className="site-header">
@@ -37,7 +39,7 @@ export default function Landing() {
           <span className="header-note">
             <span className="live-dot" /> Room for possibility
           </span>
-          <button className="button dark compact" onClick={() => setAuth(true)}>
+          <button className="button dark compact" onClick={() => {setAuthMode('login');setAuth(true);}}>
             Sign in <ArrowUpRight size={14} />
           </button>
           <button
@@ -68,7 +70,7 @@ export default function Landing() {
             <a href="/workspace" className="text-link">
               Explore the demo <ArrowUpRight size={15} />
             </a>
-            <ArrowButton onClick={() => setAuth(true)}>
+            <ArrowButton onClick={openSignup}>
               Find your space
             </ArrowButton>
           </div>
@@ -242,7 +244,7 @@ export default function Landing() {
               From a quiet hour to a team-wide catch-up, give your people a
               place to do their best work.
             </p>
-            <ArrowButton onClick={() => setAuth(true)}>
+            <ArrowButton onClick={openSignup}>
               Bring your people
             </ArrowButton>
             <div className="together-proof">
@@ -317,7 +319,7 @@ export default function Landing() {
           <div>
             <span className="eyebrow">YOUR NEXT CHAPTER HAS A PLACE.</span>
             <h2>Make room.</h2>
-            <ArrowButton onClick={() => setAuth(true)}>Get started</ArrowButton>
+            <ArrowButton onClick={openSignup}>Get started</ArrowButton>
           </div>
           <span className="banner-side">
             GOOD SPACES.
@@ -352,6 +354,7 @@ export default function Landing() {
       </footer>
       {auth && (
         <AuthModal
+          initialMode={authMode}
           onClose={() => setAuth(false)}
           onSuccess={() => {
             window.location.href = "/workspace";
