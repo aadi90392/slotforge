@@ -68,7 +68,7 @@ export default function Landing() {
           </p>
           <div className="hero-actions">
             <a href="/workspace" className="text-link">
-              Explore the demo <ArrowUpRight size={15} />
+              Open your workspace <ArrowUpRight size={15} />
             </a>
             <ArrowButton onClick={openSignup}>
               Find your space
@@ -228,7 +228,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="sample-note">
-            Meet our sample spaces. Create a workspace and make them your own.
+            A little inspiration for your workspace. Add the rooms your team actually uses.
           </p>
         </section>
         <section className="together-section">
@@ -297,8 +297,8 @@ export default function Landing() {
                 "Open My bookings to cancel or reschedule a future reservation. If your new time is unavailable, your original booking stays in place.",
               ],
               [
-                "Is this a real coworking marketplace?",
-                "SlotForge is a portfolio booking application. The pictured rooms are sample spaces, not physical venues available for purchase. You can create your own workspace to try the complete booking flow.",
+                "How do I add my own spaces?",
+                "Create an account to start an empty workspace, then add your rooms with their location, capacity, and amenities. These photos illustrate possible spaces; your workspace contains only the rooms you add.",
               ],
             ].map(([q, a]) => (
               <details key={q}>
@@ -333,7 +333,7 @@ export default function Landing() {
           <Brand />
           <div>
             <a href="#spaces">The spaces</a>
-            <a href="/workspace">Explore demo</a>
+            <a href="/workspace">Open workspace</a>
             <a href="#details">Questions</a>
           </div>
           <a href="#" className="back-top">

@@ -77,74 +77,7 @@ type Data = {
   role: string;
 };
 type Ws = { id: string; name: string; role: string };
-const demoRooms: Room[] = [
-  {
-    id: "sunroom",
-    name: "The Sunroom",
-    kind: "Meeting room",
-    capacity: 6,
-    image: "/images/sunroom.jpg",
-    location: "First floor · East wing",
-    amenities: "Natural light,Whiteboard,Fast Wi-Fi",
-  },
-  {
-    id: "boardroom",
-    name: "The Boardroom",
-    kind: "Meeting room",
-    capacity: 12,
-    image: "/images/boardroom.jpg",
-    location: "Second floor · North wing",
-    amenities: "Display screen,Video calls,Whiteboard",
-  },
-  {
-    id: "studio",
-    name: "Focus Studio",
-    kind: "Focus room",
-    capacity: 2,
-    image: "/images/studio.jpg",
-    location: "First floor · Quiet zone",
-    amenities: "Sound insulated,Fast Wi-Fi,Standing desk",
-  },
-  {
-    id: "commons",
-    name: "The Commons",
-    kind: "Collaboration",
-    capacity: 8,
-    image: "/images/commons.jpg",
-    location: "Ground floor · Garden side",
-    amenities: "Lounge seating,Natural light,Fast Wi-Fi",
-  },
-];
-function demoData(): Data {
-  return {
-    rooms: demoRooms,
-    bookings: [
-      {
-        id: "example",
-        resource_id: "sunroom",
-        resource_name: "The Sunroom",
-        image: "/images/sunroom.jpg",
-        user_id: "demo",
-        user_name: "Alex Morgan",
-        title: "A fresh perspective",
-        day: dateAfter(1),
-        hour: 10,
-        status: "confirmed",
-        hold_until: null,
-      },
-    ],
-    people: [
-      {
-        id: "demo",
-        name: "Alex Morgan",
-        email: "alex@example.com",
-        role: "owner",
-      },
-    ],
-    activity: [],
-    role: "owner",
-  };
-}
+function emptyData(): Data { return { rooms: [], bookings: [], people: [], activity: [], role: "member" }; }
 const navItems = [
   { id: "Overview", icon: LayoutDashboard },
   { id: "Spaces", icon: DoorOpen },
@@ -159,7 +92,7 @@ export default function Workspace() {
     [auth, setAuth] = useState(false),
     [workspaces, setWorkspaces] = useState<Ws[]>([]),
     [ws, setWs] = useState(""),
-    [data, setData] = useState<Data>(demoData),
+    [data, setData] = useState<Data>(emptyData),
     [tab, setTab] = useState("Overview"),
     [query, setQuery] = useState(""),
     [kind, setKind] = useState("All spaces"),
@@ -172,6 +105,7 @@ export default function Workspace() {
     [reschedule, setReschedule] = useState<Booking | null>(null),
     [cancel, setCancel] = useState<Booking | null>(null),
     [add, setAdd] = useState(false),
+    [editRoom, setEditRoom] = useState<Room | null>(null),
     [workspaceModal, setWorkspaceModal] = useState(false),
     [settings, setSettings] = useState<{
       name: string;
@@ -300,6 +234,8 @@ export default function Workspace() {
       <span>IST</span>
     </label>
   );
+  if (initial) return <main className="account-gate"><Brand /><p role="status">Loading your account...</p></main>;
+  if (!user) return <main className="account-gate"><Brand /><h1>Your space. Your team.</h1><p>Sign in to manage your spaces, invite your team, and book together.</p>{error && <p className="error">{error}</p>}<button className="button dark" onClick={() => setAuth(true)}>Sign in or create an account <ArrowRight size={16} /></button><a href="/">Back to home</a>{auth && <AuthModal initialMode="login" onClose={() => setAuth(false)} onSuccess={signedIn} />}</main>;
   return (
     <div className="app-shell">
       <aside className={"sidebar " + (mobile ? "visible" : "")}>
@@ -361,7 +297,7 @@ export default function Workspace() {
                 : api("auth/logout", {})
                     .then(() => {
                       setUser(null);
-                      setData(demoData());
+                      setData(emptyData());
                       setWs("");
                       setWorkspaces([]);
                       setTab("Overview");
@@ -640,6 +576,7 @@ export default function Workspace() {
                     key={r.id}
                     room={r}
                     onBook={() => book(r)}
+                    onEdit={data.role === "owner" ? () => setEditRoom(r) : undefined}
                     available={
                       HOURS.filter(
                         (h) =>
@@ -658,7 +595,7 @@ export default function Workspace() {
               {!filteredRooms.length && (
                 <Empty
                   title="No spaces found."
-                  text="Try another room name or choose a different category."
+                  text={data.rooms.length ? "Try another room name or choose a different category." : "Your workspace is ready. The owner can add the first space using Add space above."}
                 />
               )}
               <p className="muted small-text">
@@ -830,6 +767,7 @@ export default function Workspace() {
               )}
             </div>
           )}
+          {tab === "Settings" && <PasswordSettings />}
           {tab === "Settings" &&
             (demo ? (
               <Empty
@@ -1021,14 +959,16 @@ export default function Workspace() {
           </div>
         </Modal>
       )}
-      {add && (
+      {(add || editRoom) && (
         <AddRoom
+          room={editRoom || undefined}
           workspace={ws}
-          onClose={() => setAdd(false)}
+          onClose={() => {setAdd(false);setEditRoom(null);}}
           onDone={() => {
             setAdd(false);
             refresh();
-            notify("A new space for new ideas.");
+            setEditRoom(null);
+            notify("Space saved.");
           }}
         />
       )}
@@ -1064,7 +1004,9 @@ function RoomCard({
   room: r,
   onBook,
   available,
+  onEdit,
 }: {
+  onEdit?: () => void;
   room: Room;
   onBook: () => void;
   available?: number;
@@ -1083,6 +1025,7 @@ function RoomCard({
         </span>
       </button>
       <div className="room-body">
+        {onEdit && <button className="text-link" onClick={onEdit}>Edit space</button>}
         <div className="room-title">
           <h3>{r.name}</h3>
           <span>
@@ -1381,10 +1324,12 @@ function BookingModal({
   );
 }
 function AddRoom({
+  room,
   workspace,
   onClose,
   onDone,
 }: {
+  room?: Room;
   workspace: string;
   onClose: () => void;
   onDone: () => void;
@@ -1392,7 +1337,7 @@ function AddRoom({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (
-    <Modal title="Room for something new." onClose={onClose}>
+    <Modal title={room ? "Edit your space." : "Room for something new."} onClose={onClose}>
       <form
         className="form"
         onSubmit={async (e) => {
@@ -1401,7 +1346,7 @@ function AddRoom({
           try {
             await api(
               "resources?workspace=" + workspace,
-              Object.fromEntries(new FormData(e.currentTarget)),
+              {...Object.fromEntries(new FormData(e.currentTarget)), ...(room ? {id:room.id} : {})},
             );
             onDone();
           } catch (e) {
@@ -1418,12 +1363,13 @@ function AddRoom({
             required
             minLength={2}
             maxLength={60}
+            defaultValue={room?.name}
             placeholder="The Idea Room"
           />
         </label>
         <label>
           Kind of space
-          <select name="kind">
+          <select name="kind" defaultValue={room?.kind}>
             <option>Meeting room</option>
             <option>Focus room</option>
             <option>Collaboration</option>
@@ -1436,25 +1382,25 @@ function AddRoom({
             type="number"
             min={1}
             max={100}
-            defaultValue={4}
+            defaultValue={room?.capacity || 4}
             required
           />
         </label>
         <label>
           Location
           <input
+            defaultValue={room?.location}
             name="location"
             required
             maxLength={100}
             placeholder="Second floor · West wing"
           />
         </label>
-        <p className="fine-print">
-          New spaces use a sample photo in this release.
-        </p>
+        <label>Amenities<input defaultValue={room?.amenities} name="amenities" maxLength={300} placeholder="Whiteboard, Wi-Fi, Display screen" /></label>
+        <p className="fine-print">Only add spaces your team can actually use. A neutral cover is provided.</p>
         {error && <p className="error">{error}</p>}
         <button disabled={busy} className="button dark">
-          Add space <Plus size={16} />
+          {room ? "Save changes" : "Add space"} <Plus size={16} />
         </button>
       </form>
     </Modal>
@@ -1554,4 +1500,13 @@ function WorkspaceModal({
       )}
     </Modal>
   );
+}
+
+function PasswordSettings() {
+  const [busy,setBusy]=useState(false), [message,setMessage]=useState("");
+  return <section className="settings-card"><h2>Account security</h2><p className="muted">Changing your password signs out your other sessions.</p><form className="form" onSubmit={async e => {
+    e.preventDefault(); const form=e.currentTarget; const fields=new FormData(form); setMessage("");
+    if(fields.get("newPassword") !== fields.get("confirmPassword")){setMessage("New passwords do not match.");return;}
+    setBusy(true);try {await api("auth/password",Object.fromEntries(fields));form.reset();setMessage("Password changed. Other sessions have been signed out.");}catch(err){setMessage((err as Error).message);}finally{setBusy(false);}
+  }}><label>Current password<input type="password" name="currentPassword" autoComplete="current-password" maxLength={128} required /></label><label>New password<input type="password" name="newPassword" autoComplete="new-password" minLength={12} maxLength={128} required /></label><label>Confirm new password<input type="password" name="confirmPassword" autoComplete="new-password" minLength={12} maxLength={128} required /></label>{message && <p role="status">{message}</p>}<button className="button dark" disabled={busy}>Change password</button></form></section>;
 }

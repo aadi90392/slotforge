@@ -57,9 +57,13 @@ const ownerId = r.body.user.id;
 r = await owner("workspaces");
 const ws = r.body.workspaces[0].id;
 let dash = (await owner("dashboard?workspace=" + ws)).body;
-check("workspace seeded with four rooms", () =>
-  assert.equal(dash.rooms.length, 4),
-);
+check("new workspace starts empty", () => assert.equal(dash.rooms.length, 0));
+for (let i = 0; i < 4; i++) {
+  const created = await owner("resources?workspace=" + ws, {name: `Room ${i + 1}`, kind:"Meeting room", capacity:6, location:"First floor", amenities:"Whiteboard"});
+  assert.equal(created.status, 200);
+}
+dash = (await owner("dashboard?workspace=" + ws)).body;
+check("owner adds actual room inventory", () => assert.equal(dash.rooms.length, 4));
 const resource = dash.rooms[0].id;
 const tomorrow = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
 const payload = {
@@ -229,6 +233,24 @@ r = await anonymous("auth/login", {
   password: "not-the-right-password",
 });
 check("wrong password rejected", () => assert.equal(r.status, 401));
+const secondSession = client();
+await secondSession("auth/login",{email:`owner-${stamp}@example.test`,password});
+r = await owner("auth/password",{currentPassword:"wrong",newPassword:password+"new"});
+check("password change requires current password",()=>assert.equal(r.status,403));
+r = await owner("auth/password",{currentPassword:password,newPassword:password+"new"});
+check("password change succeeds",()=>assert.equal(r.status,200));
+r = await secondSession("auth/me");
+check("password change revokes other sessions",()=>assert.equal(r.body.user,null));
+r = await secondSession("auth/login",{email:`owner-${stamp}@example.test`,password});
+check("old password no longer works",()=>assert.equal(r.status,401));
+r = await secondSession("auth/login",{email:`owner-${stamp}@example.test`,password:password+"new"});
+check("new password signs in",()=>assert.equal(r.status,200));
+r = await owner("resources?workspace="+ws,{id:resource,name:"Renamed room",kind:"Meeting room",capacity:8,location:"West wing",amenities:"Screen"});
+check("owner edits room",()=>assert.equal(r.status,200));
+r = await member("resources?workspace="+ws,{id:resource,name:"Unauthorized",kind:"Meeting room",capacity:8,location:"West wing"});
+check("member cannot edit room",()=>assert.equal(r.status,403));
+r = await other("resources?workspace="+ws,{id:resource,name:"Unauthorized",kind:"Meeting room",capacity:8,location:"West wing"});
+check("other workspace cannot edit room",()=>assert.equal(r.status,404));
 console.log(
   `\n${checks} integration checks passed. Local test accounts: ${stamp}.`,
 );

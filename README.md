@@ -25,14 +25,15 @@ npm run dev
 
 Apply each SQL file once per local database, in filename order. The existing checkout's local database has already been initialized. Do not replay its migrations. Local data stays under ignored `.wrangler/state`; it is not included in publishing.
 
-Open the Local URL printed by the dev server (normally http://127.0.0.1:5173). The landing page and demo workspace work without an account. Create a fresh account to receive your own workspace with four sample rooms. The application does not represent real coworking inventory or take payments.
+Open the Local URL printed by the dev server (normally http://127.0.0.1:5173). The landing page is public. Workspace access requires an account. New accounts start with an empty workspace: owners add their actual rooms, capacities, locations and amenities. No fake bookings or inventory are inserted.
 
 ## Features
 
 - Create accounts, sign in, sign out; session revocation and expiry.
+- Change passwords with current-password verification and revocation of all other sessions.
 - Create/switch workspaces and join via a rotatable private invitation code.
 - Owner/member authorization enforced on the backend, including ownership checks on bookings.
-- Search and filter rooms; owners can add spaces.
+- Search and filter rooms; owners can add and edit spaces.
 - One-hour slots from 08:00 to 19:00 in Asia/Kolkata, up to 60 days ahead.
 - Temporary holds (at most five minutes, never past the slot start), explicit confirmation, cancellation and rescheduling.
 - Atomic uniqueness at the database, not a frontend-only availability check.
@@ -89,7 +90,7 @@ This is a functional portfolio MVP, not a certified production reservation syste
 - Timezone is explicitly fixed to IST, not falsely advertised as arbitrary timezone support. All slots are one hour. No payments, email delivery, file uploads, recurring reservations, or background queue service.
 - The UI refreshes workspace data every 30 seconds and revalidates writes server-side; it is not a WebSocket live-presence system.
 - Booking history is capped at 1,000 rows per workspace in this release. Pagination, retention, archival and richer analytics remain future improvements.
-- Custom resources currently use a bundled sample photo. Local demo accounts/test data are never uploaded with the build.
+- Resources use a neutral illustrated cover. Local test accounts/data are never uploaded with the build.
 
 ## Design and assets
 

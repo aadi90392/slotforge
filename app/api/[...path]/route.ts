@@ -114,6 +114,20 @@ async function handler(req: Request) {
       return json({ ok: true }, 200, { "Set-Cookie": cookie(req, "", 0) });
     }
     const user = await requireUser(req);
+    if (path === "auth/password" && req.method === "POST") {
+      await rateLimit(req, "password-change");
+      const b = await body(req);
+      const oldPassword = String(b.currentPassword || ""), nextPassword = String(b.newPassword || "");
+      assert(oldPassword.length <= 128 && nextPassword.length >= 12 && nextPassword.length <= 128, "Use a new password with 12-128 characters");
+      const stored = await db().prepare("SELECT password FROM users WHERE id=?").bind(user.id).first<{password:string}>();
+      assert(stored && await verifyPassword(oldPassword, stored.password), "Current password is incorrect", 403);
+      const nextHash = await passwordHash(nextPassword);
+      await db().batch([
+        db().prepare("UPDATE users SET password=? WHERE id=?").bind(nextHash, user.id),
+        db().prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id),
+      ]);
+      return newSession(req, user);
+    }
     if (path === "workspaces") {
       if (req.method === "GET")
         return json({
@@ -245,6 +259,15 @@ async function handler(req: Request) {
         ["Meeting room", "Focus room", "Collaboration"].includes(b.kind),
         "Invalid room type",
       );
+      const location = String(b.location || "").trim(), amenities = String(b.amenities || "").trim();
+      assert(location.length >= 2 && location.length <= 100, "Location must be 2-100 characters");
+      assert(amenities.length <= 300, "Amenities must be at most 300 characters");
+      if (b.id) {
+        const result = await db().prepare("UPDATE resources SET name=?,kind=?,capacity=?,location=?,amenities=? WHERE id=? AND workspace_id=? AND active=1")
+          .bind(name,b.kind,capacity,location,amenities,String(b.id),workspaceId).run();
+        assert(result.meta.changes === 1, "Space not found", 404);
+        return json({ok:true});
+      }
       const count = await db()
         .prepare("SELECT COUNT(*) n FROM resources WHERE workspace_id=?")
         .bind(workspaceId)
@@ -260,9 +283,9 @@ async function handler(req: Request) {
           name,
           b.kind,
           capacity,
-          "/images/studio.jpg",
+          "/images/space-cover.svg",
           String(b.location || "Main floor").slice(0, 100),
-          "Fast Wi-Fi,Whiteboard",
+          String(b.amenities || "").trim().slice(0, 300),
         )
         .run();
       return json({ ok: true });
