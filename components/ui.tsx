@@ -166,6 +166,7 @@ export function AuthModal({
             const r = await api<{
               user?: User;
               verificationRequired?: boolean;
+              message?: string;
             }>(
               "auth/" + (register ? "register" : "login"),
               Object.fromEntries(f),
@@ -173,7 +174,7 @@ export function AuthModal({
             if (r.user) onSuccess(r.user);
             else {
               setMessage(
-                "Check your email for a verification link, then sign in.",
+                r.message || "Check your email for a verification link, then sign in.",
               );
               setRegister(false);
             }

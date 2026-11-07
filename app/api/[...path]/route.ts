@@ -87,8 +87,12 @@ async function handler(req: Request) {
       await createWorkspace(u.id, `${name.split(" ")[0]}'s workspace`, [
         insertUser,
       ]);
-      await sendAccountLink(req, u, "verify");
-      return json({ verificationRequired: true, email });
+      try {
+        await sendAccountLink(req, u, "verify");
+        return json({ verificationRequired: true, email });
+      } catch {
+        return json({verificationRequired:true,email,message:"Your account was created, but the verification email could not be sent. Use Resend verification once email delivery is restored."});
+      }
     }
     if (path === "auth/login" && req.method === "POST") {
       const b = await body(req),

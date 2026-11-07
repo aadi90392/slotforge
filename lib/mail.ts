@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { assert, db, digest, randomToken, uid } from "./server";
+import { ApiError, assert, db, digest, randomToken, uid } from "./server";
 
 export function localDelivery(req: Request) {
   return (
@@ -64,11 +64,11 @@ export async function sendAccountLink(
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
       method: "POST",
       headers: {
-        "api-key": env.BREVO_API_KEY!,
+        "api-key": env.BREVO_API_KEY!.trim(),
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        sender: { name: "SlotForge", email: env.EMAIL_FROM },
+        sender: { name: "SlotForge", email: env.EMAIL_FROM?.trim() },
         to: [{ email: user.email }],
         subject:
           purpose === "verify"
@@ -78,16 +78,19 @@ export async function sendAccountLink(
       }),
       signal: AbortSignal.timeout(10000),
     });
-    assert(
-      response.ok,
-      "Email could not be delivered. Please try again later.",
-      503,
-    );
-  } catch {
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({})) as {code?: unknown};
+      const code = typeof failure.code === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(failure.code) ? failure.code : "unknown";
+      console.error("email_provider_rejected", {status: response.status, code});
+      throw new ApiError(503, "Verification email could not be sent. Your account is saved; please use Resend verification after email delivery is restored.");
+    }
+  } catch (error) {
     await db()
       .prepare("DELETE FROM auth_tokens WHERE token=?")
       .bind(hashed)
       .run();
-    throw new Error("Account email delivery failed");
+    if(error instanceof ApiError) throw error;
+    console.error("email_provider_connection_failed");
+    throw new ApiError(503,"Email service is temporarily unavailable. Please try again later.");
   }
 }

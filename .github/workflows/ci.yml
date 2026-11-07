@@ -15,6 +15,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:domain
+      - run: node --test tests/mail.test.mjs
       - run: npm run build
       - run: npm run db:local
       - name: Integration tests against local Worker
