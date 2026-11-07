@@ -13,7 +13,7 @@ function harness(status=201){
  class ApiError extends Error{constructor(status,message){super(message);this.status=status;}}
  const server={ApiError,assert:(v,m,s=400)=>{if(!v)throw new ApiError(s,m);},randomToken:()=> 'token-secret',uid:()=> 'id',digest:async()=> 'hashed-token',db:()=>({batch:async()=>[],prepare:(sql)=>({bind:()=>({run:async()=>removed.push(sql)})})})};
  const exports={};
- runInNewContext(compiled,{exports,require:(name)=>name==='cloudflare:workers'?{env}:name==='./server'?server:createRequire(import.meta.url)(name),URL,URLSearchParams,AbortSignal,console:{error:(...args)=>logs.push(args)},fetch:async(url,options)=>{sent.push({url,options});if(status==='network')throw new Error('private-network-details');return {ok:status===201,status,json:async()=>({code:'unauthorized',message:'private-provider-details'})};}});
+ runInNewContext(compiled,{exports,require:(name)=>name==='cloudflare:workers'?{env}:name==='./server'?server:createRequire(import.meta.url)(name),URL,URLSearchParams,AbortSignal,console:{error:(...args)=>logs.push(args)},fetch:async(url,options)=>{sent.push({url,options});if(status==='network')throw new Error('private-network-details');return {ok:status===201,status,headers:new Headers({'content-type':'application/json'}),text:async()=>JSON.stringify({code:'unauthorized',message:'Rejected recipient@example.test token-secret key-secret'})};}});
  return {api:exports,env,logs,sent,removed};
 }
 const req=new Request('https://app.example.test/api/auth/register');

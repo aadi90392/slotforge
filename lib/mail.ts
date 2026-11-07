@@ -79,9 +79,14 @@ export async function sendAccountLink(
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) {
-      const failure = await response.json().catch(() => ({})) as {code?: unknown};
+      const raw = await response.text();
+      let failure: {code?: unknown; message?: unknown} = {};
+      try { failure = JSON.parse(raw); } catch {}
       const code = typeof failure.code === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(failure.code) ? failure.code : "unknown";
-      console.error("email_provider_rejected", {status: response.status, code});
+      let reason = String(failure.message || raw.replace(/<[^>]*>/g," "));
+      for (const secret of [env.BREVO_API_KEY?.trim(), user.email, token, hashed]) if(secret) reason=reason.split(secret).join("[redacted]");
+      reason=reason.replace(/[\w.+-]+@[\w.-]+/g,"[email]").replace(/https?:\/\/[^\s]+/g,"[url]").replace(/[a-zA-Z0-9_-]{40,}/g,"[redacted]").replace(/\s+/g," ").slice(0,240);
+      console.error("email_provider_rejected", {status: response.status, code, reason, contentType:response.headers.get("content-type")});
       throw new ApiError(503, "Verification email could not be sent. Your account is saved; please use Resend verification after email delivery is restored.");
     }
   } catch (error) {
