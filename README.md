@@ -78,7 +78,7 @@ npx wrangler d1 migrations apply DB --remote --config dist/server/wrangler.json
 npx wrangler deploy --config dist/server/wrangler.json
 ```
 
-Replace `YOUR_D1_DATABASE_UUID` with the real value returned by Cloudflare. Use a new empty D1 database for the first deployment. After subsequent builds, rerun the configuration step before migration/deploy because builds regenerate the Wrangler file. Do not put tokens in source. The code runs without runtime API-key secrets; Wrangler authentication remains on your machine or in your CI secrets.
+Replace `YOUR_D1_DATABASE_UUID` with the real value returned by Cloudflare. Use a new empty D1 database for the first deployment. After subsequent builds, rerun the configuration step before migration/deploy because builds regenerate the Wrangler file. Do not put tokens in source. Wrangler authentication remains on your machine or in CI secrets. Production email requires the BREVO_API_KEY, EMAIL_FROM and APP_ORIGIN settings described below; signup/recovery are unavailable until they are configured.
 
 Cloudflare free plans have request, CPU, database and storage limits. The project avoids trial credits and paid integrations, but no provider's future pricing can be guaranteed. Stay on the free Workers plan and monitor actual usage. Account-level signup, any terms, and Cloudflare provisioning are not performed by the local build scripts.
 
