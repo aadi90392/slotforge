@@ -1,8 +1,8 @@
 # Operations and release checklist
 
-## Configuration (not yet provisioned)
+## Configuration
 
-Keep Workers on Free. Configure BREVO_API_KEY, EMAIL_FROM and APP_ORIGIN through Wrangler secrets or the Cloudflare dashboard; never commit their values. APP_ORIGIN must be the exact HTTPS deployment origin. Brevo requires an approved transactional email account and verified sender. Its current free allowance is 300 emails/day. A free-mail sender may be rewritten to brevosend.com; confirm actual delivery before launch. No emails have been sent from this checkout.
+Keep Workers on Free. Configure BREVO_API_KEY, EMAIL_FROM and APP_ORIGIN through Wrangler secrets or the Cloudflare dashboard; never commit their values. APP_ORIGIN must be the exact HTTPS deployment origin. Brevo requires an approved transactional email account and verified sender. Its current free allowance is 300 emails/day. A free-mail sender may be rewritten to brevosend.com; confirm actual delivery before launch. The owner confirmed production verification email delivery and sign-in on 7 November 2026; that message arrived in Spam.
 
 Production fails closed when email is unconfigured. Only development builds receiving localhost requests use the local database mailbox. `npm run mail:local -- name@example.test` displays those development links; there is no HTTP mailbox endpoint. Production builds never capture email links in the local_mail table. Links use URL fragments, expire, and are consumed only by a POST action (email link scanners do not consume them).
 

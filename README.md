@@ -2,6 +2,8 @@
 
 A TypeScript resource-booking application with a reference-inspired editorial landing page, authenticated workspaces, SQL-enforced slot exclusivity, five-minute holds, and an audit trail.
 
+Live app: https://slotforge.aditya-upadhyay1-dev.workers.dev
+
 ## Stack
 
 - React 19 + TypeScript; Vinext (Next-compatible routing) + Vite on Cloudflare Workers.
@@ -92,7 +94,7 @@ Production email requires `BREVO_API_KEY`, `EMAIL_FROM` and `APP_ORIGIN` configu
 npm run mail:local -- your-test-email@example.test
 ```
 
-Open the captured verification link, confirm verification and sign in. This development command is not a public mailbox endpoint and is not enabled in production. Brevo configuration, real inbox delivery and hosted CPU limits are deployment acceptance checks, not locally verified claims.
+Open the captured verification link, confirm verification and sign in. This development command is not a public mailbox endpoint and is not enabled in production. Production verification email delivery and verified sign-in were confirmed by the owner on 7 November 2026. The email arrived in Spam; inbox placement is not guaranteed. Hosted password recovery and CPU limits still need separate acceptance checks.
 
 See [operations guide](docs/OPERATIONS.md) for sender setup, backup/restore, monitoring, account deletion semantics and launch checks. Strong password hashing must be measured on Workers Free before launch; local tests cannot prove its CPU allowance is sufficient. Never silently reduce hashing strength or upgrade to a paid plan.
 
@@ -103,7 +105,7 @@ See [operations guide](docs/OPERATIONS.md) for sender setup, backup/restore, mon
 - Workspace availability refreshes every 30 seconds and writes are validated server-side.
 - History is paginated in 25-record pages; availability loads active bookings from today onwards independently of historical volume.
 - New workspaces are empty. Room covers use a neutral illustration. Test accounts/data remain local and are not published.
-- GitHub publication, provider provisioning, owner account setup and live acceptance testing have intentionally not been performed.
+- Public Cloudflare hosting, production email configuration and owner verification/sign-in are complete. See the release status for remaining live acceptance checks.
 
 ## Design and assets
 

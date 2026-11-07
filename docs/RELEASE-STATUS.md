@@ -19,8 +19,21 @@
 - Browser: verification link, verified sign-in, room archive confirmation and account settings checked.
 - Production bundle on local Worker: health and page routes returned 200; unconfigured email signup/recovery returned 503; security headers verified. Development mailbox is not used by production.
 
-## Deliberately deferred to deployment
+## Production status — 7 November 2026
 
-No GitHub push, public deployment, provider signup, real email delivery, owner account provisioning or paid-plan activation has been performed. GitHub Actions has been authored but has not run on GitHub.
+- Public Worker: https://slotforge.aditya-upadhyay1-dev.workers.dev, with D1 migrations applied.
+- GitHub repository published; an earlier CI run was confirmed green by the owner.
+- Production email settings configured through Cloudflare secrets. No credentials are stored in source.
+- Fixed verification delivery diagnostics and partial-signup error handling; four mocked mail tests cover failures without sending real email.
+- Owner confirmed real verification email receipt, verification and sign-in. The verification email arrived in Spam, so inbox placement remains a limitation.
+- Temporary protected email diagnostics and their secret were removed after identifying an incorrectly saved API key.
 
-Configure the user's hosting and email-provider accounts, verify the sender, run real inbox tests, and measure strong-password hashing against Workers Free CPU/memory limits. Local checks do not establish hosted free-tier suitability. If the Free plan cannot support it, revisit hosting/authentication without weakening password storage or enabling paid billing. See OPERATIONS.md.
+## Remaining live acceptance and operations checks
+
+- Exercise password recovery and password change on the hosted app.
+- Exercise two real accounts joining a workspace, competing for a slot, rescheduling, and member removal on the hosted app. Local integration coverage does not replace this live check.
+- Measure signup/login CPU and memory on Workers Free; one successful login does not prove capacity under concurrent usage. Do not weaken hashing or enable billing to hide a failed check.
+- Create a private production backup and establish a backup/restore routine; local restore testing has passed.
+- Monitor provider quotas, errors, key expiry and email deliverability. No provider can guarantee perpetual free service or inbox placement.
+
+These are explicitly unverified production checks, not claims that the corresponding implemented features are absent. See OPERATIONS.md.
