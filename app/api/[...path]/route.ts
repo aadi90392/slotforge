@@ -1,3 +1,4 @@
+import { validateRoomPhoto } from "@/lib/room-photo";
 import { accountRoute } from "@/lib/account";
 import { requireMail, sendAccountLink } from "@/lib/mail";
 import {
@@ -243,6 +244,12 @@ async function handler(req: Request) {
     }
     const workspaceId = url.searchParams.get("workspace") || "";
     const membership = await member(user.id, workspaceId);
+    if (path === "resources/photo" && req.method === "GET") {
+      const room = await db().prepare("SELECT image FROM resources WHERE id=? AND workspace_id=?").bind(url.searchParams.get("id") || "", workspaceId).first<{image:string}>();
+      assert(room && room.image.startsWith("data:image/jpeg;base64,"), "Photo not found", 404);
+      const bytes = Uint8Array.from(atob(room.image.split(",")[1]), c => c.charCodeAt(0));
+      return new Response(bytes, {headers:{"Content-Type":"image/jpeg", "Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff"}});
+    }
     await db()
       .prepare(
         "UPDATE bookings SET status='expired',updated_at=?,updated_by='system' WHERE workspace_id=? AND status='held' AND hold_until<=?",
@@ -343,7 +350,7 @@ async function handler(req: Request) {
       ];
       const rows = await db()
         .prepare(
-          `SELECT b.*,r.name resource_name,r.image,u.name user_name FROM bookings b JOIN resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE ${where} ORDER BY b.day DESC,b.hour DESC,b.id LIMIT 25 OFFSET ?`,
+          `SELECT b.*,r.name resource_name,CASE WHEN r.image LIKE 'data:%' THEN '/api/resources/photo?workspace=' || r.workspace_id || '&id=' || r.id || '&v=' || hex(randomblob(4)) ELSE r.image END image,u.name user_name FROM bookings b JOIN resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE ${where} ORDER BY b.day DESC,b.hour DESC,b.id LIMIT 25 OFFSET ?`,
         )
         .bind(...args, (page - 1) * 25)
         .all();
@@ -364,12 +371,12 @@ async function handler(req: Request) {
       const [rooms, bookings, people, activity] = await db().batch([
         db()
           .prepare(
-            "SELECT * FROM resources WHERE workspace_id=? AND active=1 ORDER BY name",
+            "SELECT id,workspace_id,name,kind,capacity,location,amenities,active,CASE WHEN image LIKE 'data:%' THEN '/api/resources/photo?workspace=' || workspace_id || '&id=' || id || '&v=' || hex(randomblob(4)) ELSE image END image FROM resources WHERE workspace_id=? AND active=1 ORDER BY name",
           )
           .bind(workspaceId),
         db()
           .prepare(
-            "SELECT b.*,r.name resource_name,r.image,u.name user_name FROM bookings b JOIN resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE b.workspace_id=? AND b.day>=? AND b.status IN ('held','confirmed') ORDER BY b.day,b.hour",
+            "SELECT b.*,r.name resource_name,CASE WHEN r.image LIKE 'data:%' THEN '/api/resources/photo?workspace=' || r.workspace_id || '&id=' || r.id || '&v=' || hex(randomblob(4)) ELSE r.image END image,u.name user_name FROM bookings b JOIN resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE b.workspace_id=? AND b.day>=? AND b.status IN ('held','confirmed') ORDER BY b.day,b.hour",
           )
           .bind(workspaceId, today()),
         db()
@@ -429,7 +436,12 @@ async function handler(req: Request) {
     }
     if (path === "resources" && req.method === "POST") {
       assert(membership.role === "owner", "Only the owner can add spaces", 403);
-      const b = await body(req);
+      const b = await body(req, 140000);
+      let photo: string | null = null;
+      if (b.photo !== undefined) {
+        try { photo = validateRoomPhoto(b.photo); }
+        catch (e) { throw new ApiError(400, (e as Error).message); }
+      }
       const name = String(b.name || "").trim(),
         capacity = Number(b.capacity);
       assert(
@@ -457,7 +469,7 @@ async function handler(req: Request) {
       if (b.id) {
         const result = await db()
           .prepare(
-            "UPDATE resources SET name=?,kind=?,capacity=?,location=?,amenities=? WHERE id=? AND workspace_id=? AND active=1",
+            "UPDATE resources SET name=?,kind=?,capacity=?,location=?,amenities=?,image=COALESCE(?,image) WHERE id=? AND workspace_id=? AND active=1",
           )
           .bind(
             name,
@@ -465,6 +477,7 @@ async function handler(req: Request) {
             capacity,
             location,
             amenities,
+            photo,
             String(b.id),
             workspaceId,
           )
@@ -489,7 +502,7 @@ async function handler(req: Request) {
           name,
           b.kind,
           capacity,
-          "/images/space-cover.svg",
+          photo || "/images/space-cover.svg",
           String(b.location || "Main floor").slice(0, 100),
           String(b.amenities || "")
             .trim()

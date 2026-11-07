@@ -1,4 +1,5 @@
 "use client";
+import { prepareRoomPhoto } from "@/lib/prepare-room-photo";
 import { useState, useEffect, useCallback, useRef, FormEvent } from "react";
 import {
   ArrowUpRight,
@@ -1552,7 +1553,9 @@ function AddRoom({
   onDone: () => void;
 }) {
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [photo, setPhoto] = useState<string | undefined>(undefined),
+    [processing, setProcessing] = useState(false);
   return (
     <Modal
       title={room ? "Edit your space." : "Room for something new."}
@@ -1567,6 +1570,7 @@ function AddRoom({
             await api("resources?workspace=" + workspace, {
               ...Object.fromEntries(new FormData(e.currentTarget)),
               ...(room ? { id: room.id } : {}),
+              ...(photo !== undefined ? { photo } : {}),
             });
             onDone();
           } catch (e) {
@@ -1576,6 +1580,25 @@ function AddRoom({
           }
         }}
       >
+        <div className="room-photo-editor">
+          <img src={photo === "" ? "/images/space-cover.svg" : photo ?? room?.image ?? "/images/space-cover.svg"} alt="Room photo preview" />
+          <label>
+            Room photo
+            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || processing}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (!file) return;
+                setProcessing(true); setError("");
+                try { setPhoto(await prepareRoomPhoto(file)); }
+                catch (error) { setError((error as Error).message); }
+                finally { setProcessing(false); }
+              }} />
+          </label>
+          <p className="fine-print" role="status">{processing ? "Preparing your photo…" : "JPG, PNG or WebP · Up to 10 MB. Automatically resized and compressed."}</p>
+          {(photo || (photo === undefined && room?.image !== "/images/space-cover.svg" && room?.image)) &&
+            <button type="button" className="text-button" disabled={busy || processing} onClick={() => setPhoto("")}>Remove photo</button>}
+        </div>
         <label>
           Space name
           <input
@@ -1626,11 +1649,10 @@ function AddRoom({
           />
         </label>
         <p className="fine-print">
-          Only add spaces your team can actually use. A neutral cover is
-          provided.
+          Only add spaces your team can actually use. Photos are visible to workspace members.
         </p>
         {error && <p className="error">{error}</p>}
-        <button disabled={busy} className="button dark">
+        <button disabled={busy || processing} className="button dark">
           {room ? "Save changes" : "Add space"} <Plus size={16} />
         </button>
       </form>

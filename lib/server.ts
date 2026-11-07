@@ -93,14 +93,14 @@ export class ApiError extends Error {
 export function assert(v: unknown, message: string, status = 400): asserts v {
   if (!v) throw new ApiError(status, message);
 }
-export async function body(req: Request) {
+export async function body(req: Request, limit = 16000) {
   assert(
-    Number(req.headers.get("content-length") || 0) < 16000,
+    Number(req.headers.get("content-length") || 0) < limit,
     "Request too large",
     413,
   );
   const raw = await req.text();
-  assert(raw.length < 16000, "Request too large", 413);
+  assert(raw.length < limit, "Request too large", 413);
   try {
     const parsed = JSON.parse(raw);
     assert(

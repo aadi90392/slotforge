@@ -35,7 +35,7 @@ function client() {
     } catch {
       body = { error: text };
     }
-    return { status: res.status, body, cookie: set };
+    return { status: res.status, body, cookie: set, type: res.headers.get("content-type"), cache: res.headers.get("cache-control") };
   };
 }
 const owner = client(),
@@ -322,6 +322,34 @@ r = await other("resources?workspace=" + ws, {
   location: "West wing",
 });
 check("other workspace cannot edit room", () => assert.equal(r.status, 404));
+
+const photo = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDmqKKK908U/9k=";
+const roomEdit = {id:resource,name:"Photo room",kind:"Meeting room",capacity:8,location:"West wing"};
+r = await owner("resources?workspace=" + ws, {...roomEdit, photo});
+check("owner uploads room photo", () => assert.equal(r.status, 200));
+const photoPath = "resources/photo?workspace=" + ws + "&id=" + resource;
+r = await owner(photoPath);
+check("owner can read private JPEG", () => {assert.equal(r.status,200);assert.equal(r.type,"image/jpeg");assert.equal(r.cache,"private, no-store");});
+r = await member(photoPath);
+check("workspace member can see photo", () => assert.equal(r.status,200));
+r = await other(photoPath);
+check("other workspace cannot read photo", () => assert.equal(r.status,404));
+r = await anonymous(photoPath);
+check("anonymous cannot read photo", () => assert.equal(r.status,401));
+r = await owner("resources?workspace=" + ws, roomEdit);
+r = await owner(photoPath);
+check("room edit preserves existing photo", () => assert.equal(r.status,200));
+dash = (await owner("dashboard?workspace=" + ws)).body;
+check("dashboard uses photo endpoint instead of embedding image bytes", () => assert.ok(dash.rooms.find(x=>x.id===resource).image.startsWith("/api/"+photoPath+"&v=")));
+for (const invalid of ["data:image/svg+xml;base64,PHN2Zz4=", "https://example.com/photo.jpg", "data:image/jpeg;base64,AAAA", "x".repeat(132000)]) {
+ r = await owner("resources?workspace=" + ws, {...roomEdit,photo:invalid});
+ check("reject unsafe or oversized photo",()=>assert.equal(r.status,400));
+}
+r = await member("resources?workspace=" + ws, {...roomEdit,photo});
+check("member cannot replace photo",()=>assert.equal(r.status,403));
+r = await owner("resources?workspace=" + ws, {...roomEdit,photo:""});
+r = await owner(photoPath);
+check("photo removal deletes stored image",()=>assert.equal(r.status,404));
 
 r = await anonymous("auth/forgot", { email: `owner-${stamp}@example.test` });
 check("password recovery gives generic response", () =>

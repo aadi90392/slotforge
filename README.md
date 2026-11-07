@@ -36,6 +36,7 @@ Open the Local URL printed by the dev server (normally http://127.0.0.1:5173). T
 - Create/switch workspaces and join via a rotatable private invitation code.
 - Owner/member authorization enforced on the backend, including ownership checks on bookings.
 - Search and filter rooms; owners can add, edit and archive spaces.
+- Upload, preview, replace and remove private room photos. Browser compression accepts JPG/PNG/WebP up to 10 MB and stores a JPEG up to 1024 pixels and 96 KiB in the existing D1 image column; no additional storage service is required. Photos are served only to authenticated workspace members.
 - Remove teammates, cancel their future bookings and rotate the invitation code.
 - Delete and anonymize your account with password confirmation.
 - One-hour slots from 08:00 to 19:00 in Asia/Kolkata, up to 60 days ahead.
@@ -101,10 +102,10 @@ See [operations guide](docs/OPERATIONS.md) for sender setup, backup/restore, mon
 ## Product boundaries
 
 - Fixed IST timezone, one-hour slots, 8 AM-7 PM, 60-day booking window.
-- No payments, recurring bookings, file uploads, custom schedules or MFA.
+- No payments, recurring bookings, general document uploads, custom schedules or MFA.
 - Workspace availability refreshes every 30 seconds and writes are validated server-side.
 - History is paginated in 25-record pages; availability loads active bookings from today onwards independently of historical volume.
-- New workspaces are empty. Room covers use a neutral illustration. Test accounts/data remain local and are not published.
+- New workspaces are empty. Room covers use uploaded photos or a neutral illustration. Test accounts/data remain local and are not published.
 - Public Cloudflare hosting, production email configuration and owner verification/sign-in are complete. See the release status for remaining live acceptance checks.
 
 ## Design and assets

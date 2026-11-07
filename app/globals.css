@@ -3130,3 +3130,7 @@ footer {
 
 .account-settings { margin-bottom: 24px; align-items:start; }
 .account-gate .settings-card { text-align:left; }
+
+.room-photo-editor { display: grid; gap: 12px; }
+.room-photo-editor > img { width: 100%; height: 180px; object-fit: cover; border-radius: 16px; background: #e9eee2; }
+.room-photo-editor input[type="file"] { padding: 12px; max-width: 100%; }
