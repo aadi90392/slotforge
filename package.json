@@ -14,7 +14,9 @@
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
     "test:integration": "node tests/integration.mjs",
-    "test:domain": "node --experimental-strip-types --test tests/domain.test.mjs"
+    "test:domain": "node --experimental-strip-types --test tests/domain.test.mjs",
+    "db:local": "node scripts/migrate-local.mjs",
+    "mail:local": "node scripts/local-mail.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

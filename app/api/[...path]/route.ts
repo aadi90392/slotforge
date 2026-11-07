@@ -1,3 +1,5 @@
+import { accountRoute } from "@/lib/account";
+import { requireMail, sendAccountLink } from "@/lib/mail";
 import {
   db,
   uid,
@@ -43,8 +45,15 @@ async function handler(req: Request) {
         415,
       );
     }
+    const accountResponse = await accountRoute(req, path);
+    if (accountResponse) return accountResponse;
+    if (path === "health" && req.method === "GET") {
+      await db().prepare("SELECT 1").first();
+      return json({ status: "ok" });
+    }
     if (path === "auth/me") return json({ user: await currentUser(req) });
     if (path === "auth/register" && req.method === "POST") {
+      requireMail(req);
       const b = await body(req);
       const email = String(b.email || "")
           .trim()
@@ -78,7 +87,8 @@ async function handler(req: Request) {
       await createWorkspace(u.id, `${name.split(" ")[0]}'s workspace`, [
         insertUser,
       ]);
-      return newSession(req, u);
+      await sendAccountLink(req, u, "verify");
+      return json({ verificationRequired: true, email });
     }
     if (path === "auth/login" && req.method === "POST") {
       const b = await body(req),
@@ -91,16 +101,39 @@ async function handler(req: Request) {
         "Invalid credentials",
       );
       await rateLimit(req, "login");
+      await rateLimit(req, "login-account", 20, email);
       const u = await db()
-        .prepare("SELECT * FROM users WHERE email=?")
+        .prepare("SELECT * FROM users WHERE email=? AND deleted_at IS NULL")
         .bind(email)
-        .first<{ id: string; name: string; email: string; password: string }>();
+        .first<{
+          id: string;
+          name: string;
+          email: string;
+          password: string;
+          email_verified: number;
+        }>();
       const ok = await verifyPassword(
         password,
-        u?.password || "missing:" + "0".repeat(64),
+        u?.password ||
+          "scrypt$16384$8$5$" + "0".repeat(64) + "$" + "0".repeat(64),
       );
       assert(u && ok, "Email or password is incorrect", 401);
-      return newSession(req, { id: u.id, name: u.name, email: u.email });
+      assert(
+        u.email_verified,
+        "Verify your email before signing in. Use Resend verification below.",
+        403,
+      );
+      if (!u.password.startsWith("scrypt$"))
+        await db()
+          .prepare("UPDATE users SET password=? WHERE id=? AND password=?")
+          .bind(await passwordHash(password), u.id, u.password)
+          .run();
+      return newSession(req, {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        email_verified: u.email_verified,
+      });
     }
     if (path === "auth/logout" && req.method === "POST") {
       const token = req.headers
@@ -117,17 +150,53 @@ async function handler(req: Request) {
     if (path === "auth/password" && req.method === "POST") {
       await rateLimit(req, "password-change");
       const b = await body(req);
-      const oldPassword = String(b.currentPassword || ""), nextPassword = String(b.newPassword || "");
-      assert(oldPassword.length <= 128 && nextPassword.length >= 12 && nextPassword.length <= 128, "Use a new password with 12-128 characters");
-      const stored = await db().prepare("SELECT password FROM users WHERE id=?").bind(user.id).first<{password:string}>();
-      assert(stored && await verifyPassword(oldPassword, stored.password), "Current password is incorrect", 403);
+      const oldPassword = String(b.currentPassword || ""),
+        nextPassword = String(b.newPassword || "");
+      assert(
+        oldPassword.length <= 128 &&
+          nextPassword.length >= 12 &&
+          nextPassword.length <= 128,
+        "Use a new password with 12-128 characters",
+      );
+      const stored = await db()
+        .prepare("SELECT password FROM users WHERE id=?")
+        .bind(user.id)
+        .first<{ password: string }>();
+      assert(
+        stored && (await verifyPassword(oldPassword, stored.password)),
+        "Current password is incorrect",
+        403,
+      );
       const nextHash = await passwordHash(nextPassword);
-      await db().batch([
-        db().prepare("UPDATE users SET password=? WHERE id=?").bind(nextHash, user.id),
-        db().prepare("DELETE FROM sessions WHERE user_id=?").bind(user.id),
+      const changed = await db().batch([
+        db()
+          .prepare("UPDATE users SET password=? WHERE id=? AND password=?")
+          .bind(nextHash, user.id, stored.password),
+        db()
+          .prepare(
+            "DELETE FROM sessions WHERE user_id=? AND EXISTS(SELECT 1 FROM users WHERE id=? AND password=?)",
+          )
+          .bind(user.id, user.id, nextHash),
+        db()
+          .prepare(
+            "DELETE FROM auth_tokens WHERE user_id=? AND EXISTS(SELECT 1 FROM users WHERE id=? AND password=?)",
+          )
+          .bind(user.id, user.id, nextHash),
       ]);
+      assert(
+        changed[0].meta.changes === 1,
+        "Account changed. Sign in again before changing your password.",
+        409,
+      );
       return newSession(req, user);
     }
+    assert(
+      user.email_verified,
+      "Verify your email before using your workspace",
+      403,
+    );
+    if (req.method !== "GET")
+      await rateLimit(req, "workspace-write", 150, user.id);
     if (path === "workspaces") {
       if (req.method === "GET")
         return json({
@@ -142,6 +211,7 @@ async function handler(req: Request) {
         });
       const b = await body(req);
       if (b.invite) {
+        await rateLimit(req, "join", 15);
         const w = await db()
           .prepare("SELECT id FROM workspaces WHERE invite_code=?")
           .bind(String(b.invite).trim())
@@ -175,6 +245,117 @@ async function handler(req: Request) {
       )
       .bind(Date.now(), workspaceId, Date.now())
       .run();
+    if (path === "members/remove" && req.method === "POST") {
+      assert(
+        membership.role === "owner",
+        "Only the owner can remove members",
+        403,
+      );
+      const b = await body(req),
+        target = String(b.userId || "");
+      assert(
+        target !== user.id && target !== membership.owner_id,
+        "The workspace owner cannot be removed",
+      );
+      const now = Date.now(),
+        local = new Date(now + 19800000),
+        day = local.toISOString().slice(0, 10),
+        hour = local.getUTCHours();
+      await db().batch([
+        db()
+          .prepare(
+            "UPDATE bookings SET status='cancelled',updated_at=?,updated_by=? WHERE workspace_id=? AND user_id=? AND status IN ('held','confirmed') AND (day>? OR (day=? AND hour>?))",
+          )
+          .bind(now, user.id, workspaceId, target, day, day, hour),
+        db()
+          .prepare(
+            "DELETE FROM members WHERE workspace_id=? AND user_id=? AND role<>'owner'",
+          )
+          .bind(workspaceId, target),
+        db()
+          .prepare("UPDATE workspaces SET invite_code=? WHERE id=?")
+          .bind(randomToken(), workspaceId),
+      ]);
+      return json({ ok: true });
+    }
+    if (path === "resources/archive" && req.method === "POST") {
+      assert(
+        membership.role === "owner",
+        "Only the owner can archive spaces",
+        403,
+      );
+      const b = await body(req),
+        id = String(b.id || "");
+      const room = await db()
+        .prepare("SELECT id FROM resources WHERE id=? AND workspace_id=?")
+        .bind(id, workspaceId)
+        .first();
+      assert(room, "Space not found", 404);
+      const now = Date.now(),
+        local = new Date(now + 19800000),
+        day = local.toISOString().slice(0, 10),
+        hour = local.getUTCHours();
+      await db().batch([
+        db()
+          .prepare(
+            "UPDATE resources SET active=0 WHERE id=? AND workspace_id=?",
+          )
+          .bind(id, workspaceId),
+        db()
+          .prepare(
+            "UPDATE bookings SET status='cancelled',updated_at=?,updated_by=? WHERE resource_id=? AND workspace_id=? AND status IN ('held','confirmed') AND (day>? OR (day=? AND hour>?))",
+          )
+          .bind(now, user.id, id, workspaceId, day, day, hour),
+      ]);
+      return json({ ok: true });
+    }
+    if (path === "booking-history" && req.method === "GET") {
+      const page = Math.max(
+        1,
+        Math.min(100000, Number(url.searchParams.get("page")) || 1),
+      );
+      assert(Number.isInteger(page), "Invalid page");
+      const filter = url.searchParams.get("filter") || "All",
+        query = (url.searchParams.get("q") || "").slice(0, 100);
+      assert(
+        ["All", "Upcoming", "Cancelled"].includes(filter),
+        "Invalid filter",
+      );
+      const now = new Date(Date.now() + 19800000),
+        day = now.toISOString().slice(0, 10),
+        hour = now.getUTCHours();
+      const where =
+        "b.workspace_id=? AND b.user_id=? AND (?='All' OR (?='Cancelled' AND b.status='cancelled') OR (?='Upcoming' AND b.status IN ('held','confirmed') AND (b.day>? OR (b.day=? AND b.hour>?)))) AND instr(lower(b.title || ' ' || r.name),lower(?))>0";
+      const args = [
+        workspaceId,
+        user.id,
+        filter,
+        filter,
+        filter,
+        day,
+        day,
+        hour,
+        query,
+      ];
+      const rows = await db()
+        .prepare(
+          `SELECT b.*,r.name resource_name,r.image,u.name user_name FROM bookings b JOIN resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE ${where} ORDER BY b.day DESC,b.hour DESC,b.id LIMIT 25 OFFSET ?`,
+        )
+        .bind(...args, (page - 1) * 25)
+        .all();
+      const count = await db()
+        .prepare(
+          `SELECT count(*) total FROM bookings b JOIN resources r ON r.id=b.resource_id WHERE ${where}`,
+        )
+        .bind(...args)
+        .first<{ total: number }>();
+      return json({
+        bookings: rows.results,
+        total: count?.total || 0,
+        page,
+        pageSize: 25,
+      });
+    }
     if (path === "dashboard" && req.method === "GET") {
       const [rooms, bookings, people, activity] = await db().batch([
         db()
@@ -184,9 +365,9 @@ async function handler(req: Request) {
           .bind(workspaceId),
         db()
           .prepare(
-            "SELECT b.*,r.name resource_name,r.image,u.name user_name FROM bookings b JOIN resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE b.workspace_id=? ORDER BY b.day,b.hour LIMIT 1000",
+            "SELECT b.*,r.name resource_name,r.image,u.name user_name FROM bookings b JOIN resources r ON r.id=b.resource_id JOIN users u ON u.id=b.user_id WHERE b.workspace_id=? AND b.day>=? AND b.status IN ('held','confirmed') ORDER BY b.day,b.hour",
           )
-          .bind(workspaceId),
+          .bind(workspaceId, today()),
         db()
           .prepare(
             "SELECT u.id,u.name,u.email,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.workspace_id=? ORDER BY m.role,u.name",
@@ -259,17 +440,38 @@ async function handler(req: Request) {
         ["Meeting room", "Focus room", "Collaboration"].includes(b.kind),
         "Invalid room type",
       );
-      const location = String(b.location || "").trim(), amenities = String(b.amenities || "").trim();
-      assert(location.length >= 2 && location.length <= 100, "Location must be 2-100 characters");
-      assert(amenities.length <= 300, "Amenities must be at most 300 characters");
+      const location = String(b.location || "").trim(),
+        amenities = String(b.amenities || "").trim();
+      assert(
+        location.length >= 2 && location.length <= 100,
+        "Location must be 2-100 characters",
+      );
+      assert(
+        amenities.length <= 300,
+        "Amenities must be at most 300 characters",
+      );
       if (b.id) {
-        const result = await db().prepare("UPDATE resources SET name=?,kind=?,capacity=?,location=?,amenities=? WHERE id=? AND workspace_id=? AND active=1")
-          .bind(name,b.kind,capacity,location,amenities,String(b.id),workspaceId).run();
+        const result = await db()
+          .prepare(
+            "UPDATE resources SET name=?,kind=?,capacity=?,location=?,amenities=? WHERE id=? AND workspace_id=? AND active=1",
+          )
+          .bind(
+            name,
+            b.kind,
+            capacity,
+            location,
+            amenities,
+            String(b.id),
+            workspaceId,
+          )
+          .run();
         assert(result.meta.changes === 1, "Space not found", 404);
-        return json({ok:true});
+        return json({ ok: true });
       }
       const count = await db()
-        .prepare("SELECT COUNT(*) n FROM resources WHERE workspace_id=?")
+        .prepare(
+          "SELECT COUNT(*) n FROM resources WHERE workspace_id=? AND active=1",
+        )
         .bind(workspaceId)
         .first<{ n: number }>();
       assert((count?.n || 0) < 30, "Up to 30 spaces per workspace");
@@ -285,7 +487,9 @@ async function handler(req: Request) {
           capacity,
           "/images/space-cover.svg",
           String(b.location || "Main floor").slice(0, 100),
-          String(b.amenities || "").trim().slice(0, 300),
+          String(b.amenities || "")
+            .trim()
+            .slice(0, 300),
         )
         .run();
       return json({ ok: true });
@@ -459,6 +663,14 @@ async function handler(req: Request) {
     if (message.includes("UNIQUE constraint"))
       return json(
         { error: "This record already exists. Refresh and try again." },
+        409,
+      );
+    if (
+      message.includes("inactive_resource") ||
+      message.includes("missing_membership")
+    )
+      return json(
+        { error: "Space or membership changed. Refresh and try again." },
         409,
       );
     console.error("API error", e);

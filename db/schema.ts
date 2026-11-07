@@ -11,6 +11,8 @@ export const users = sqliteTable("users", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  emailVerified: integer("email_verified").notNull().default(0),
+  deletedAt: integer("deleted_at"),
   createdAt: integer("created_at").notNull(),
 });
 export const sessions = sqliteTable("sessions", {
@@ -100,4 +102,24 @@ export const limits = sqliteTable("rate_limits", {
   key: text("key").primaryKey(),
   count: integer("count").notNull(),
   expires: integer("expires").notNull(),
+});
+
+export const authTokens = sqliteTable(
+  "auth_tokens",
+  {
+    token: text("token").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    purpose: text("purpose").notNull(),
+    expires: integer("expires").notNull(),
+  },
+  (t) => [index("auth_token_user").on(t.userId, t.purpose)],
+);
+export const localMail = sqliteTable("local_mail", {
+  id: text("id").primaryKey(),
+  recipient: text("recipient").notNull(),
+  purpose: text("purpose").notNull(),
+  link: text("link").notNull(),
+  createdAt: integer("created_at").notNull(),
 });

@@ -3127,3 +3127,6 @@ footer {
 
 .account-gate { min-height: 100svh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:24px; padding:32px; text-align:center; }
 .account-gate h1 { font-size:clamp(32px,5vw,64px); letter-spacing:-.05em; }
+
+.account-settings { margin-bottom: 24px; align-items:start; }
+.account-gate .settings-card { text-align:left; }

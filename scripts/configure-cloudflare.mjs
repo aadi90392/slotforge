@@ -24,6 +24,7 @@ config.d1_databases = [
   },
 ];
 config.workers_dev = true;
+config.observability = { enabled: true, head_sampling_rate: 0.1 };
 await writeFile(file, JSON.stringify(config, null, 2) + "\n");
 console.log(
   "Standalone Cloudflare config prepared. No account changes or deployment performed.",

@@ -18,28 +18,30 @@ Requires Node 22.13+ (Node 24 recommended). On Windows use `npm.cmd` if PowerShe
 ```sh
 npm ci
 npm run build
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_lowly_thor.sql
-node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0001_booking_audit.sql
+npm run db:local
 npm run dev
 ```
 
-Apply each SQL file once per local database, in filename order. The existing checkout's local database has already been initialized. Do not replay its migrations. Local data stays under ignored `.wrangler/state`; it is not included in publishing.
+`db:local` applies pending migrations and records them; it is safe to run again. Local data remains in ignored `.wrangler/state`.
 
 Open the Local URL printed by the dev server (normally http://127.0.0.1:5173). The landing page is public. Workspace access requires an account. New accounts start with an empty workspace: owners add their actual rooms, capacities, locations and amenities. No fake bookings or inventory are inserted.
 
 ## Features
 
+- Verify email before sign-in; expiring single-use verification and password-reset links.
 - Create accounts, sign in, sign out; session revocation and expiry.
 - Change passwords with current-password verification and revocation of all other sessions.
 - Create/switch workspaces and join via a rotatable private invitation code.
 - Owner/member authorization enforced on the backend, including ownership checks on bookings.
-- Search and filter rooms; owners can add and edit spaces.
+- Search and filter rooms; owners can add, edit and archive spaces.
+- Remove teammates, cancel their future bookings and rotate the invitation code.
+- Delete and anonymize your account with password confirmation.
 - One-hour slots from 08:00 to 19:00 in Asia/Kolkata, up to 60 days ahead.
 - Temporary holds (at most five minutes, never past the slot start), explicit confirmation, cancellation and rescheduling.
 - Atomic uniqueness at the database, not a frontend-only availability check.
 - Idempotency keys: retries reuse a booking; changed payloads with the same key are rejected.
 - Transactional audit triggers for reservation creation, status changes, and rescheduling.
-- Workspace statistics, team list, booking history, and activity feed.
+- Workspace statistics, team list, paginated booking history, and activity feed.
 - Mobile navigation, dialogs, accessible labels, keyboard focus, and reduced-motion styles.
 
 ## Data integrity
@@ -80,17 +82,28 @@ Replace `YOUR_D1_DATABASE_UUID` with the real value returned by Cloudflare. Use 
 
 Cloudflare free plans have request, CPU, database and storage limits. The project avoids trial credits and paid integrations, but no provider's future pricing can be guaranteed. Stay on the free Workers plan and monitor actual usage. Account-level signup, any terms, and Cloudflare provisioning are not performed by the local build scripts.
 
-## Release boundaries
+## Security, email and operations
 
-This is a functional portfolio MVP, not a certified production reservation system.
+Passwords use versioned scrypt hashes (N=16384, r=8, p=5); legacy PBKDF2 records upgrade after a verified successful login. Session and email-link tokens are random 256-bit values stored as SHA-256 digests. Password changes/resets revoke sessions and outstanding links. Email tokens are consumed transactionally. Authentication is rate-limited per IP and per account; workspace writes have per-user limits. Database guards reject bookings if a room was archived or membership removed concurrently.
 
-- Email ownership verification, password recovery, MFA, and account deletion flows are not yet implemented. Use unique test passwords, and do not put sensitive business data in the demo.
-- Password hashing uses PBKDF2-SHA256 at 100,000 iterations, the Web Crypto iteration limit in the target Workers runtime. This is below commonly recommended modern password-storage work factors. Harden authentication (for example, passkeys or an audited hosted identity option) before opening registration for sensitive production use. Sessions are random 256-bit tokens stored only as SHA-256 digests in D1.
-- Login/registration have per-IP limits; broader abuse protection and credential-stuffing controls remain future work. Expired sessions and rate-limit entries are cleaned on session creation.
-- Timezone is explicitly fixed to IST, not falsely advertised as arbitrary timezone support. All slots are one hour. No payments, email delivery, file uploads, recurring reservations, or background queue service.
-- The UI refreshes workspace data every 30 seconds and revalidates writes server-side; it is not a WebSocket live-presence system.
-- Booking history is capped at 1,000 rows per workspace in this release. Pagination, retention, archival and richer analytics remain future improvements.
-- Resources use a neutral illustrated cover. Local test accounts/data are never uploaded with the build.
+Production email requires `BREVO_API_KEY`, `EMAIL_FROM` and `APP_ORIGIN` configured securely. A development build on localhost captures messages in a LOCAL database mailbox instead of sending them. After local signup, run:
+
+```sh
+npm run mail:local -- your-test-email@example.test
+```
+
+Open the captured verification link, confirm verification and sign in. This development command is not a public mailbox endpoint and is not enabled in production. Brevo configuration, real inbox delivery and hosted CPU limits are deployment acceptance checks, not locally verified claims.
+
+See [operations guide](docs/OPERATIONS.md) for sender setup, backup/restore, monitoring, account deletion semantics and launch checks. Strong password hashing must be measured on Workers Free before launch; local tests cannot prove its CPU allowance is sufficient. Never silently reduce hashing strength or upgrade to a paid plan.
+
+## Product boundaries
+
+- Fixed IST timezone, one-hour slots, 8 AM-7 PM, 60-day booking window.
+- No payments, recurring bookings, file uploads, custom schedules or MFA.
+- Workspace availability refreshes every 30 seconds and writes are validated server-side.
+- History is paginated in 25-record pages; availability loads active bookings from today onwards independently of historical volume.
+- New workspaces are empty. Room covers use a neutral illustration. Test accounts/data remain local and are not published.
+- GitHub publication, provider provisioning, owner account setup and live acceptance testing have intentionally not been performed.
 
 ## Design and assets
 

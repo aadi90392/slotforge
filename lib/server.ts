@@ -1,3 +1,4 @@
+import { scrypt, timingSafeEqual } from "node:crypto";
 import { env } from "cloudflare:workers";
 export function db() {
   if (!env.DB) throw new Error("Database unavailable");
@@ -16,7 +17,37 @@ export async function digest(s: string) {
     (b) => b.toString(16).padStart(2, "0"),
   ).join("");
 }
-export async function passwordHash(password: string, salt = randomToken()) {
+async function derive(password: string, salt: string) {
+  return new Promise<Buffer>((resolve, reject) =>
+    scrypt(
+      password,
+      salt,
+      32,
+      { N: 16384, r: 8, p: 5, maxmem: 32 * 1024 * 1024 },
+      (error, key) => (error ? reject(error) : resolve(key)),
+    ),
+  );
+}
+export async function passwordHash(password: string) {
+  const salt = randomToken();
+  return `scrypt$16384$8$5$${salt}$${(await derive(password, salt)).toString("hex")}`;
+}
+export async function verifyPassword(password: string, stored: string) {
+  if (stored.startsWith("scrypt$")) {
+    const parts = stored.split("$");
+    if (
+      parts.length !== 6 ||
+      parts.slice(1, 4).join("$") !== "16384$8$5" ||
+      !/^[a-f0-9]{64}$/.test(parts[5])
+    )
+      return false;
+    return timingSafeEqual(
+      await derive(password, parts[4]),
+      Buffer.from(parts[5], "hex"),
+    );
+  }
+  // Legacy records are upgraded after successful login.
+  const [salt, hash] = stored.split(":");
   const material = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
@@ -34,20 +65,8 @@ export async function passwordHash(password: string, salt = randomToken()) {
     material,
     256,
   );
-  return (
-    salt +
-    ":" +
-    Array.from(new Uint8Array(bits), (b) =>
-      b.toString(16).padStart(2, "0"),
-    ).join("")
-  );
-}
-export async function verifyPassword(password: string, stored: string) {
-  const computed = await passwordHash(password, stored.split(":")[0]);
-  let diff = computed.length ^ stored.length;
-  for (let i = 0; i < computed.length; i++)
-    diff |= computed.charCodeAt(i) ^ (stored.charCodeAt(i) || 0);
-  return diff === 0;
+  const expected = Buffer.from(hash || "", "hex");
+  return expected.length === 32 && timingSafeEqual(Buffer.from(bits), expected);
 }
 export function json(
   data: unknown,
@@ -93,7 +112,12 @@ export async function body(req: Request) {
     throw new ApiError(400, "Invalid JSON object");
   }
 }
-export type User = { id: string; name: string; email: string };
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  email_verified?: number;
+};
 export async function currentUser(req: Request): Promise<User | null> {
   const token = req.headers
     .get("cookie")
@@ -101,7 +125,7 @@ export async function currentUser(req: Request): Promise<User | null> {
   if (!token) return null;
   return db()
     .prepare(
-      "SELECT u.id,u.name,u.email FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>?",
+      "SELECT u.id,u.name,u.email,u.email_verified FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=? AND s.expires>? AND u.deleted_at IS NULL",
     )
     .bind(await digest(token), Date.now())
     .first<User>();
@@ -119,6 +143,7 @@ export async function newSession(req: Request, user: User) {
   await db().batch([
     db().prepare("DELETE FROM sessions WHERE expires<?").bind(Date.now()),
     db().prepare("DELETE FROM rate_limits WHERE expires<?").bind(Date.now()),
+    db().prepare("DELETE FROM auth_tokens WHERE expires<?").bind(Date.now()),
   ]);
   await db()
     .prepare("INSERT INTO sessions(token,user_id,expires) VALUES(?,?,?)")
@@ -141,10 +166,15 @@ export async function member(userId: string, workspaceId: string) {
   assert(m, "Workspace not found", 404);
   return m;
 }
-export async function rateLimit(req: Request, action: string) {
+export async function rateLimit(
+  req: Request,
+  action: string,
+  limit = 15,
+  subject?: string,
+) {
   const bucket = Math.floor(Date.now() / 900000);
   const ip = req.headers.get("cf-connecting-ip") || "local";
-  const key = await digest(`${action}:${ip}:${bucket}`);
+  const key = await digest(`${action}:${subject || ip}:${bucket}`);
   const r = await db()
     .prepare(
       "INSERT INTO rate_limits(key,count,expires) VALUES(?,1,?) ON CONFLICT(key) DO UPDATE SET count=count+1 RETURNING count",
@@ -152,7 +182,7 @@ export async function rateLimit(req: Request, action: string) {
     .bind(key, Date.now() + 900000)
     .first<{ count: number }>();
   assert(
-    r && r.count <= 15,
+    r && r.count <= limit,
     "Too many attempts. Please try again in 15 minutes.",
     429,
   );

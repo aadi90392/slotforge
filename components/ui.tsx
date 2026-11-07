@@ -1,7 +1,12 @@
 "use client";
 import { useEffect, useRef, useState, ReactNode } from "react";
 import { ArrowUpRight, X, Loader2, ArrowRight } from "lucide-react";
-export type User = { id: string; name: string; email: string };
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  email_verified?: number;
+};
 export async function api<T = unknown>(
   path: string,
   data?: unknown,
@@ -129,15 +134,17 @@ export function Modal({
 export function AuthModal({
   onClose,
   onSuccess,
-  initialMode = 'register',
+  initialMode = "register",
 }: {
   onClose: () => void;
   onSuccess: (u: User) => void;
-  initialMode?: 'register' | 'login';
+  initialMode?: "register" | "login";
 }) {
-  const [register, setRegister] = useState(initialMode === 'register'),
+  const [register, setRegister] = useState(initialMode === "register"),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [message, setMessage] = useState(""),
+    [email, setEmail] = useState("");
   return (
     <Modal
       title={register ? "A little space for you." : "Welcome back."}
@@ -156,11 +163,20 @@ export function AuthModal({
           setError("");
           const f = new FormData(e.currentTarget);
           try {
-            const r = await api<{ user: User }>(
+            const r = await api<{
+              user?: User;
+              verificationRequired?: boolean;
+            }>(
               "auth/" + (register ? "register" : "login"),
               Object.fromEntries(f),
             );
-            onSuccess(r.user);
+            if (r.user) onSuccess(r.user);
+            else {
+              setMessage(
+                "Check your email for a verification link, then sign in.",
+              );
+              setRegister(false);
+            }
           } catch (e) {
             setError((e as Error).message);
           } finally {
@@ -184,6 +200,8 @@ export function AuthModal({
         <label>
           Email address
           <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             name="email"
             type="email"
             autoComplete="email"
@@ -203,6 +221,7 @@ export function AuthModal({
             placeholder={register ? "At least 12 characters" : "Your password"}
           />
         </label>
+        {message && <p role="status">{message}</p>}
         {error && (
           <p role="alert" className="error">
             {error}
@@ -231,9 +250,33 @@ export function AuthModal({
           {register ? "Sign in" : "Create an account"}
         </button>
       </p>
+      {!register && (
+        <div className="button-row">
+          <a href="/account">Forgot password?</a>
+          <button
+            className="text-button"
+            disabled={busy || !email}
+            onClick={async () => {
+              setBusy(true);
+              setError("");
+              try {
+                const r = await api<{ message: string }>("auth/resend", {
+                  email,
+                });
+                setMessage(r.message);
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Resend verification
+          </button>
+        </div>
+      )}
       <p className="fine-print">
-        Portfolio release · Email verification and password recovery are not yet
-        available. Use a unique password.
+        Use a unique password with at least 12 characters.
       </p>
     </Modal>
   );

@@ -77,7 +77,9 @@ type Data = {
   role: string;
 };
 type Ws = { id: string; name: string; role: string };
-function emptyData(): Data { return { rooms: [], bookings: [], people: [], activity: [], role: "member" }; }
+function emptyData(): Data {
+  return { rooms: [], bookings: [], people: [], activity: [], role: "member" };
+}
 const navItems = [
   { id: "Overview", icon: LayoutDashboard },
   { id: "Spaces", icon: DoorOpen },
@@ -114,6 +116,44 @@ export default function Workspace() {
     } | null>(null),
     [settingsBusy, setSettingsBusy] = useState(false),
     [bookingFilter, setBookingFilter] = useState("Upcoming");
+  const [history, setHistory] = useState<Booking[]>([]),
+    [historyTotal, setHistoryTotal] = useState(0),
+    [historyPage, setHistoryPage] = useState(1),
+    [historyBusy, setHistoryBusy] = useState(false);
+  const [operation, setOperation] = useState<{
+      path: string;
+      body: unknown;
+      title: string;
+      detail: string;
+    } | null>(null),
+    [operationBusy, setOperationBusy] = useState(false);
+  useEffect(() => {
+    setHistoryPage(1);
+  }, [ws, bookingFilter, query]);
+  useEffect(() => {
+    if (!user || !ws || tab !== "My bookings") return;
+    let cancelled = false;
+    setHistoryBusy(true);
+    setHistory([]);
+    api<{ bookings: Booking[]; total: number }>(
+      `booking-history?workspace=${ws}&page=${historyPage}&filter=${encodeURIComponent(bookingFilter)}&q=${encodeURIComponent(query)}`,
+    )
+      .then((r) => {
+        if (!cancelled) {
+          setHistory(r.bookings);
+          setHistoryTotal(r.total);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, ws, tab, historyPage, bookingFilter, query, data]);
   const demo = !user;
   const activeWorkspace = useRef(ws);
   activeWorkspace.current = ws;
@@ -194,18 +234,7 @@ export default function Workspace() {
       (b.status === "held" && (b.hold_until || 0) > Date.now()),
   );
   const dayBookings = active.filter((b) => b.day === date);
-  const myBookings = data.bookings.filter(
-    (b) =>
-      (demo || b.user_id === user?.id) &&
-      (bookingFilter === "All" ||
-        (bookingFilter === "Cancelled" && b.status === "cancelled") ||
-        (bookingFilter === "Upcoming" &&
-          ["held", "confirmed"].includes(b.status) &&
-          slotTime(b.day, b.hour) > Date.now())) &&
-      `${b.title} ${b.resource_name}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
+  const myBookings = history;
   const filteredRooms = data.rooms.filter(
     (r) =>
       (kind === "All spaces" || r.kind === kind) &&
@@ -234,8 +263,76 @@ export default function Workspace() {
       <span>IST</span>
     </label>
   );
-  if (initial) return <main className="account-gate"><Brand /><p role="status">Loading your account...</p></main>;
-  if (!user) return <main className="account-gate"><Brand /><h1>Your space. Your team.</h1><p>Sign in to manage your spaces, invite your team, and book together.</p>{error && <p className="error">{error}</p>}<button className="button dark" onClick={() => setAuth(true)}>Sign in or create an account <ArrowRight size={16} /></button><a href="/">Back to home</a>{auth && <AuthModal initialMode="login" onClose={() => setAuth(false)} onSuccess={signedIn} />}</main>;
+  if (initial)
+    return (
+      <main className="account-gate">
+        <Brand />
+        <p role="status">Loading your account...</p>
+      </main>
+    );
+  if (user && !user.email_verified)
+    return (
+      <main className="account-gate">
+        <Brand />
+        <h1>Verify your email</h1>
+        <p>Verify {user.email} to access your workspace.</p>
+        {error && <p role="alert">{error}</p>}
+        {toast && <p role="status">{toast}</p>}
+        <button
+          className="button dark"
+          onClick={async () => {
+            try {
+              const r = await api<{ message: string }>("auth/resend", {
+                email: user.email,
+              });
+              notify(r.message);
+            } catch (e) {
+              setError((e as Error).message);
+            }
+          }}
+        >
+          Resend verification
+        </button>
+        <button
+          className="text-button"
+          onClick={() => window.location.reload()}
+        >
+          I have verified my email
+        </button>
+        <button
+          className="text-button"
+          onClick={async () => {
+            await api("auth/logout", {});
+            setUser(null);
+            setError("");
+          }}
+        >
+          Sign out
+        </button>
+      </main>
+    );
+  if (!user)
+    return (
+      <main className="account-gate">
+        <Brand />
+        <h1>Your space. Your team.</h1>
+        <p>
+          Sign in to manage your spaces, invite your team, and book together.
+        </p>
+        {error && <p className="error">{error}</p>}
+        <button className="button dark" onClick={() => setAuth(true)}>
+          Sign in or create an account <ArrowRight size={16} />
+        </button>
+        <a href="/">Back to home</a>
+        {auth && (
+          <AuthModal
+            initialMode="login"
+            onClose={() => setAuth(false)}
+            onSuccess={signedIn}
+          />
+        )}
+      </main>
+    );
   return (
     <div className="app-shell">
       <aside className={"sidebar " + (mobile ? "visible" : "")}>
@@ -576,7 +673,20 @@ export default function Workspace() {
                     key={r.id}
                     room={r}
                     onBook={() => book(r)}
-                    onEdit={data.role === "owner" ? () => setEditRoom(r) : undefined}
+                    onEdit={
+                      data.role === "owner" ? () => setEditRoom(r) : undefined
+                    }
+                    onArchive={
+                      data.role === "owner"
+                        ? () =>
+                            setOperation({
+                              path: "resources/archive",
+                              body: { id: r.id },
+                              title: "Archive this space?",
+                              detail: `${r.name} will stop accepting bookings. Its future reservations will be cancelled; history is retained.`,
+                            })
+                        : undefined
+                    }
                     available={
                       HOURS.filter(
                         (h) =>
@@ -595,7 +705,11 @@ export default function Workspace() {
               {!filteredRooms.length && (
                 <Empty
                   title="No spaces found."
-                  text={data.rooms.length ? "Try another room name or choose a different category." : "Your workspace is ready. The owner can add the first space using Add space above."}
+                  text={
+                    data.rooms.length
+                      ? "Try another room name or choose a different category."
+                      : "Your workspace is ready. The owner can add the first space using Add space above."
+                  }
                 />
               )}
               <p className="muted small-text">
@@ -695,6 +809,29 @@ export default function Workspace() {
               </div>
             </>
           )}
+          {tab === "My bookings" && (
+            <div className="button-row" aria-label="Booking history pages">
+              <button
+                className="button soft"
+                disabled={historyPage === 1 || historyBusy}
+                onClick={() => setHistoryPage((p) => p - 1)}
+              >
+                Previous
+              </button>
+              <span role="status">
+                {historyBusy
+                  ? "Loading bookings..."
+                  : `Page ${historyPage} of ${Math.max(1, Math.ceil(historyTotal / 25))} · ${historyTotal} bookings`}
+              </span>
+              <button
+                className="button soft"
+                disabled={historyPage * 25 >= historyTotal || historyBusy}
+                onClick={() => setHistoryPage((p) => p + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
           {tab === "Team" && (
             <>
               <div className="subheading">
@@ -727,6 +864,21 @@ export default function Workspace() {
                       <p>{p.email}</p>
                     </div>
                     <span className="pill">{p.role}</span>
+                    {data.role === "owner" && p.role !== "owner" && (
+                      <button
+                        className="text-button"
+                        onClick={() =>
+                          setOperation({
+                            path: "members/remove",
+                            body: { userId: p.id },
+                            title: "Remove this teammate?",
+                            detail: `${p.name} will lose access and their future bookings will be cancelled. The invitation code will also rotate.`,
+                          })
+                        }
+                      >
+                        Remove member
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -767,7 +919,12 @@ export default function Workspace() {
               )}
             </div>
           )}
-          {tab === "Settings" && <PasswordSettings />}
+          {tab === "Settings" && (
+            <div className="settings-grid account-settings">
+              <PasswordSettings />
+              <DeleteAccount />
+            </div>
+          )}
           {tab === "Settings" &&
             (demo ? (
               <Empty
@@ -959,11 +1116,57 @@ export default function Workspace() {
           </div>
         </Modal>
       )}
+      {operation && (
+        <Modal
+          title={operation.title}
+          onClose={() => {
+            if (!operationBusy) setOperation(null);
+          }}
+        >
+          <p>{operation.detail}</p>
+          <div className="button-row">
+            <button
+              disabled={operationBusy}
+              className="button soft"
+              onClick={() => setOperation(null)}
+            >
+              Keep unchanged
+            </button>
+            <button
+              disabled={operationBusy}
+              className="button dark"
+              onClick={async () => {
+                setOperationBusy(true);
+                try {
+                  await api(
+                    operation.path + "?workspace=" + ws,
+                    operation.body,
+                  );
+                  setOperation(null);
+                  setSettings(null);
+                  await refresh();
+                  notify("Workspace updated.");
+                } catch (e) {
+                  setError((e as Error).message);
+                  setOperation(null);
+                } finally {
+                  setOperationBusy(false);
+                }
+              }}
+            >
+              Confirm
+            </button>
+          </div>
+        </Modal>
+      )}
       {(add || editRoom) && (
         <AddRoom
           room={editRoom || undefined}
           workspace={ws}
-          onClose={() => {setAdd(false);setEditRoom(null);}}
+          onClose={() => {
+            setAdd(false);
+            setEditRoom(null);
+          }}
           onDone={() => {
             setAdd(false);
             refresh();
@@ -1005,8 +1208,10 @@ function RoomCard({
   onBook,
   available,
   onEdit,
+  onArchive,
 }: {
   onEdit?: () => void;
+  onArchive?: () => void;
   room: Room;
   onBook: () => void;
   available?: number;
@@ -1025,7 +1230,18 @@ function RoomCard({
         </span>
       </button>
       <div className="room-body">
-        {onEdit && <button className="text-link" onClick={onEdit}>Edit space</button>}
+        <div className="button-row">
+          {onEdit && (
+            <button className="text-link" onClick={onEdit}>
+              Edit space
+            </button>
+          )}
+          {onArchive && (
+            <button className="text-link" onClick={onArchive}>
+              Archive
+            </button>
+          )}
+        </div>
         <div className="room-title">
           <h3>{r.name}</h3>
           <span>
@@ -1039,6 +1255,7 @@ function RoomCard({
         <div className="amenities">
           {r.amenities
             .split(",")
+            .filter(Boolean)
             .slice(0, 2)
             .map((a, i) => (
               <span key={a}>
@@ -1337,17 +1554,20 @@ function AddRoom({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (
-    <Modal title={room ? "Edit your space." : "Room for something new."} onClose={onClose}>
+    <Modal
+      title={room ? "Edit your space." : "Room for something new."}
+      onClose={onClose}
+    >
       <form
         className="form"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
           try {
-            await api(
-              "resources?workspace=" + workspace,
-              {...Object.fromEntries(new FormData(e.currentTarget)), ...(room ? {id:room.id} : {})},
-            );
+            await api("resources?workspace=" + workspace, {
+              ...Object.fromEntries(new FormData(e.currentTarget)),
+              ...(room ? { id: room.id } : {}),
+            });
             onDone();
           } catch (e) {
             setError((e as Error).message);
@@ -1396,8 +1616,19 @@ function AddRoom({
             placeholder="Second floor · West wing"
           />
         </label>
-        <label>Amenities<input defaultValue={room?.amenities} name="amenities" maxLength={300} placeholder="Whiteboard, Wi-Fi, Display screen" /></label>
-        <p className="fine-print">Only add spaces your team can actually use. A neutral cover is provided.</p>
+        <label>
+          Amenities
+          <input
+            defaultValue={room?.amenities}
+            name="amenities"
+            maxLength={300}
+            placeholder="Whiteboard, Wi-Fi, Display screen"
+          />
+        </label>
+        <p className="fine-print">
+          Only add spaces your team can actually use. A neutral cover is
+          provided.
+        </p>
         {error && <p className="error">{error}</p>}
         <button disabled={busy} className="button dark">
           {room ? "Save changes" : "Add space"} <Plus size={16} />
@@ -1503,10 +1734,149 @@ function WorkspaceModal({
 }
 
 function PasswordSettings() {
-  const [busy,setBusy]=useState(false), [message,setMessage]=useState("");
-  return <section className="settings-card"><h2>Account security</h2><p className="muted">Changing your password signs out your other sessions.</p><form className="form" onSubmit={async e => {
-    e.preventDefault(); const form=e.currentTarget; const fields=new FormData(form); setMessage("");
-    if(fields.get("newPassword") !== fields.get("confirmPassword")){setMessage("New passwords do not match.");return;}
-    setBusy(true);try {await api("auth/password",Object.fromEntries(fields));form.reset();setMessage("Password changed. Other sessions have been signed out.");}catch(err){setMessage((err as Error).message);}finally{setBusy(false);}
-  }}><label>Current password<input type="password" name="currentPassword" autoComplete="current-password" maxLength={128} required /></label><label>New password<input type="password" name="newPassword" autoComplete="new-password" minLength={12} maxLength={128} required /></label><label>Confirm new password<input type="password" name="confirmPassword" autoComplete="new-password" minLength={12} maxLength={128} required /></label>{message && <p role="status">{message}</p>}<button className="button dark" disabled={busy}>Change password</button></form></section>;
+  const [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
+  return (
+    <section className="settings-card">
+      <h2>Account security</h2>
+      <p className="muted">
+        Changing your password signs out your other sessions.
+      </p>
+      <form
+        className="form"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const form = e.currentTarget;
+          const fields = new FormData(form);
+          setMessage("");
+          if (fields.get("newPassword") !== fields.get("confirmPassword")) {
+            setMessage("New passwords do not match.");
+            return;
+          }
+          setBusy(true);
+          try {
+            await api("auth/password", Object.fromEntries(fields));
+            form.reset();
+            setMessage(
+              "Password changed. Other sessions have been signed out.",
+            );
+          } catch (err) {
+            setMessage((err as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label>
+          Current password
+          <input
+            type="password"
+            name="currentPassword"
+            autoComplete="current-password"
+            maxLength={128}
+            required
+          />
+        </label>
+        <label>
+          New password
+          <input
+            type="password"
+            name="newPassword"
+            autoComplete="new-password"
+            minLength={12}
+            maxLength={128}
+            required
+          />
+        </label>
+        <label>
+          Confirm new password
+          <input
+            type="password"
+            name="confirmPassword"
+            autoComplete="new-password"
+            minLength={12}
+            maxLength={128}
+            required
+          />
+        </label>
+        {message && <p role="status">{message}</p>}
+        <button className="button dark" disabled={busy}>
+          Change password
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function DeleteAccount() {
+  const [open, setOpen] = useState(false),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  return (
+    <section className="settings-card">
+      <h2>Delete account</h2>
+      <p className="muted">
+        Remove your profile and sign-in credentials. Future reservations are
+        cancelled. Anonymized booking history stays with the team. Remove other
+        members from workspaces you own first.
+      </p>
+      <button className="button soft" onClick={() => setOpen(true)}>
+        Delete my account
+      </button>
+      {open && (
+        <Modal
+          title="Permanently delete your account?"
+          onClose={() => {
+            if (!busy) setOpen(false);
+          }}
+        >
+          <form
+            className="form"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setBusy(true);
+              setError("");
+              try {
+                await api(
+                  "auth/delete",
+                  Object.fromEntries(new FormData(e.currentTarget)),
+                );
+                window.location.assign("/");
+              } catch (e) {
+                setError((e as Error).message);
+                setBusy(false);
+              }
+            }}
+          >
+            <p>
+              This cannot be undone. Booking titles remain in team history;
+              remove personal details from them before deleting your account.
+            </p>
+            <label>
+              Current password
+              <input
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                maxLength={128}
+                required
+              />
+            </label>
+            <label>
+              Type DELETE
+              <input name="confirmation" pattern="DELETE" required />
+            </label>
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <button disabled={busy} className="button dark">
+              Permanently delete account
+            </button>
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
 }

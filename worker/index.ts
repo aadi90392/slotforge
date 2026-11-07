@@ -3,7 +3,11 @@ import { runWithConnectorBinding } from "../lib/connector-context";
 import type { ConnectorBinding } from "../lib/connector-contract.mjs";
 
 const worker = {
-  fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>) {
+  async fetch(
+    request: Request,
+    env: Cloudflare.Env,
+    ctx: ExecutionContext<{ CONNECTORS?: ConnectorBinding }>,
+  ) {
     let binding = ctx.props?.CONNECTORS;
     // Local preview emulates the same request-scoped capability. This branch and
     // the auxiliary service binding are absent from production builds.
@@ -12,18 +16,39 @@ const worker = {
       const expiresAt = Date.now() + 60_000;
       binding = {
         async getContext() {
-          if (Date.now() >= expiresAt) return { status: "request_context_expired" };
+          if (Date.now() >= expiresAt)
+            return { status: "request_context_expired" };
           return preview.getContext?.() ?? { status: "binding_unavailable" };
         },
         async invoke(connectorId, actionName, args) {
           if (Date.now() >= expiresAt) {
-            return { status: "request_context_expired", message: "This request has expired. Please try again." };
+            return {
+              status: "request_context_expired",
+              message: "This request has expired. Please try again.",
+            };
           }
           return preview.invoke(connectorId, actionName, args);
         },
       };
     }
-    return runWithConnectorBinding(binding, () => handler.fetch(request, env, ctx));
+    const result = await runWithConnectorBinding(binding, () =>
+      handler.fetch(request, env, ctx),
+    );
+    const response = new Response(result.body, result);
+    response.headers.set("X-Content-Type-Options", "nosniff");
+    response.headers.set("Referrer-Policy", "no-referrer");
+    response.headers.set("X-Frame-Options", "DENY");
+    response.headers.set(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=()",
+    );
+    response.headers.set(
+      "Content-Security-Policy",
+      "frame-ancestors 'none'; object-src 'none'; base-uri 'self'",
+    );
+    if (new URL(request.url).protocol === "https:")
+      response.headers.set("Strict-Transport-Security", "max-age=31536000");
+    return response;
   },
 };
 
